@@ -1,0 +1,3 @@
+*.sh linguist-language=Shell
+packages/server-motd/00-server-motd linguist-language=Shell
+packages/server-update-command/aggiorna linguist-language=Shell
