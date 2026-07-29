@@ -1,0 +1,11 @@
+# Modifica solo queste righe per ogni nuova macchina.
+DISPLAY_NAME="APP-SRV-01"
+DESCRIPTION="Application server"
+APP_VERSION="<none>"
+
+# Facoltativo: lascia vuoto per rilevare automaticamente l'interfaccia IPv4 principale.
+NETWORK_INTERFACE=""
+
+# Facoltativo: Machine-ID del template originale, utile per verificare i cloni.
+# Se lasciato vuoto, verrà mostrato "OK - Machine-ID presente".
+TEMPLATE_MACHINE_ID=""

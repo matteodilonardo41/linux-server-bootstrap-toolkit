@@ -1,0 +1,31 @@
+# Materiale originale e temporaneo
+*.zip
+staging/
+staging-original-backup/
+
+# Configurazioni reali e segreti
+*.env
+*.secret
+*.secrets
+*.key
+*.pem
+*.vault
+credentials*
+secrets*
+
+# File locali e backup
+*.bak
+*.backup
+*.tmp
+*~
+.DS_Store
+Thumbs.db
+
+# Log
+*.log
+logs/*
+!logs/.gitkeep
+
+# Editor
+.vscode/
+.idea/

@@ -1,0 +1,148 @@
+#!/bin/bash
+# MOTD standard generico - compatibile con Debian/Ubuntu.
+# Configurazione: /etc/default/server-motd
+
+set -u
+
+CONFIG=/etc/default/server-motd
+[ -r "$CONFIG" ] && . "$CONFIG"
+
+DISPLAY_NAME=${DISPLAY_NAME:-$(hostname -s | tr '[:lower:]' '[:upper:]')}
+DESCRIPTION=${DESCRIPTION:-Server Linux}
+APP_VERSION=${APP_VERSION:-<none>}
+NETWORK_INTERFACE=${NETWORK_INTERFACE:-}
+TEMPLATE_MACHINE_ID=${TEMPLATE_MACHINE_ID:-}
+
+RESET='\033[0m'
+GREEN='\033[32m'
+YELLOW='\033[1;33m'
+RED='\033[31m'
+GRAY='\033[00;33m'
+BLUE='\033[34m'
+
+# Evita che un precedente MOTD lasci il terminale colorato.
+printf '%b' "$RESET"
+
+hostname_short=$(hostname -s 2>/dev/null || hostname)
+hostname_fqdn=$(hostname -f 2>/dev/null || hostname)
+
+if [ -r /etc/os-release ]; then
+    . /etc/os-release
+    linux_ver=${PRETTY_NAME:-Linux}
+    suite=${VERSION_CODENAME:-}
+else
+    linux_ver=$(uname -s)
+    suite=""
+fi
+
+if [ -z "$NETWORK_INTERFACE" ]; then
+    NETWORK_INTERFACE=$(ip -4 route show default 2>/dev/null | awk 'NR==1 {print $5}')
+fi
+
+current_ip=""
+if [ -n "$NETWORK_INTERFACE" ]; then
+    current_ip=$(ip -4 -o addr show dev "$NETWORK_INTERFACE" scope global 2>/dev/null | awk 'NR==1 {split($4,a,"/"); print a[1]}')
+fi
+[ -n "$current_ip" ] || current_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+[ -n "$current_ip" ] || current_ip="Non rilevato"
+
+# Aggiornamenti disponibili.
+upgradeable_count=$(apt list --upgradable 2>/dev/null | awk 'NR>1 && NF {n++} END {print n+0}')
+if [ "$upgradeable_count" -gt 0 ]; then
+    updates_text="${YELLOW}${upgradeable_count} pacchetti aggiornabili${RESET}"
+else
+    updates_text="${GREEN}Nessun pacchetto aggiornabile${RESET}"
+fi
+
+# Riavvio richiesto.
+if [ -f /run/reboot-required ] || [ -f /var/run/reboot-required ]; then
+    reboot_text="${YELLOW}Riavvio Richiesto${RESET}"
+else
+    reboot_text="${GREEN}Riavvio non Necessario${RESET}"
+fi
+
+# Mostra solo le correzioni di sicurezza realmente installabili tramite APT.
+vuln_text="Controllo non disponibile"
+if command -v debsecan >/dev/null 2>&1 && [ -n "$suite" ]; then
+    fixable_count=0
+
+    for pkg in $(debsecan --suite "$suite" --only-fixed --format packages 2>/dev/null | sort -u); do
+        installed=$(dpkg-query -W -f='${Version}' "$pkg" 2>/dev/null) || continue
+        candidate=$(apt-cache policy "$pkg" 2>/dev/null | awk '/Candidate:/ {print $2; exit}')
+
+        if [ -n "$candidate" ] &&
+           [ "$candidate" != "(none)" ] &&
+           dpkg --compare-versions "$candidate" gt "$installed"; then
+            fixable_count=$((fixable_count + 1))
+        fi
+    done
+
+    if [ "$fixable_count" -eq 0 ]; then
+        vuln_text="${GREEN}Nessuna correzione di sicurezza disponibile${RESET}"
+    elif [ "$fixable_count" -eq 1 ]; then
+        vuln_text="${YELLOW}1 pacchetto con correzione di sicurezza disponibile${RESET}"
+    else
+        vuln_text="${RED}${fixable_count} pacchetti con correzioni di sicurezza disponibili${RESET}"
+    fi
+elif command -v pro >/dev/null 2>&1; then
+    vuln_text="Verificare con: pro security-status"
+fi
+
+uptime_value=$(uptime -p 2>/dev/null | sed 's/^up //')
+[ -n "$uptime_value" ] || uptime_value="Non disponibile"
+load_value=$(awk '{printf "Last Minute: %s, Last 5 Minutes: %s, Last 15 Minutes: %s",$1,$2,$3}' /proc/loadavg)
+
+active_users=$(who | awk '{print $1}' | sort -u)
+active_count=$(printf '%s\n' "$active_users" | sed '/^$/d' | wc -l)
+active_list=$(printf '%s\n' "$active_users" | tr '\n' ' ')
+
+disk_used=$(df -P / | awk 'NR==2 {print $5}')
+memory_used=$(free | awk '/^Mem:/ {if ($2>0) printf "%.0f%%",($3/$2)*100; else print "N/D"}')
+swap_used=$(free | awk '/^Swap:/ {if ($2>0) printf "%.0f%%",($3/$2)*100; else print "0%"}')
+process_count=$(ps -e --no-headers 2>/dev/null | wc -l)
+current_machine_id=$(cat /etc/machine-id 2>/dev/null || true)
+
+if [ -n "$TEMPLATE_MACHINE_ID" ] && [ "$current_machine_id" = "$TEMPLATE_MACHINE_ID" ]; then
+    clone_status="${RED}WARNING - Rigenerare il Machine-ID${RESET}"
+else
+    clone_status="${GREEN}OK - Macchina Clonata Correttamente${RESET}"
+fi
+
+# Controllo IP duplicato best-effort con arping, senza falsi positivi dalla cache ARP locale.
+ip_status="${GREEN}IP OK${RESET}"
+if command -v arping >/dev/null 2>&1 && [ "$current_ip" != "Non rilevato" ] && [ -n "$NETWORK_INTERFACE" ]; then
+    if arping -D -c 2 -w 2 -I "$NETWORK_INTERFACE" "$current_ip" 2>/dev/null | grep -q 'Unicast reply'; then
+        ip_status="${RED}WARNING - Possibile IP duplicato${RESET}"
+    fi
+fi
+
+printf '\n'
+if command -v figlet >/dev/null 2>&1; then
+    # Stesso titolo per tutte le macchine: cambia solo DISPLAY_NAME nel file di configurazione.
+    printf '%b' "$BLUE"
+    figlet -f standard "$DISPLAY_NAME" 2>/dev/null || printf '%s\n' "$DISPLAY_NAME"
+    printf '%b' "$RESET"
+else
+    printf '%b%s%b\n' "$BLUE" "$DISPLAY_NAME" "$RESET"
+fi
+
+printf '\n'
+printf ' Benvenuto su   : %b%s%b\n' "$YELLOW" "$(printf '%s' "$hostname_short" | tr '[:lower:]' '[:upper:]')" "$RESET"
+printf ' Hostname       : %b%s%b\n' "$GREEN" "$hostname_fqdn" "$RESET"
+printf ' Versione       : %s\n' "$APP_VERSION"
+printf ' Linux Version  : %b%s%b\n' "$GRAY" "$linux_ver" "$RESET"
+printf ' Aggiornamenti  : %b\n' "$updates_text"
+printf ' Vulnerabilità  : %b\n' "$vuln_text"
+printf ' Riavvio        : %b\n' "$reboot_text"
+printf ' Uptime         : %s\n' "$uptime_value"
+printf ' Prestazioni    : %b%s%b\n' "$GREEN" "$load_value" "$RESET"
+printf ' Utenti Attivi  : %b%s (%s)%b\n' "$GRAY" "$active_count" "$active_list" "$RESET"
+printf ' IP Address     : %b%s - %b%b\n' "$GRAY" "$current_ip" "$ip_status" "$RESET"
+printf ' Orario         : %s\n' "$(date)"
+printf ' Disco Usato    : %b%s%b\n' "$GREEN" "$disk_used" "$RESET"
+printf ' Memoria Usata  : %b%s%b\n' "$GREEN" "$memory_used" "$RESET"
+printf ' Swap Usata     : %b%s%b\n' "$GREEN" "$swap_used" "$RESET"
+printf ' Processi       : %s\n' "$process_count"
+printf ' Clone_Macchina : %b\n' "$clone_status"
+printf ' Machine-ID     : %s\n' "$current_machine_id"
+printf '\n%b' "$RESET"
